@@ -1,0 +1,1310 @@
+{
+  "nodes": [
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "loose",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.content.isNotEmpty() && $json.links.length > 0}}",
+                    "rightValue": "",
+                    "operator": {
+                      "type": "boolean",
+                      "operation": "true",
+                      "singleValue": true
+                    },
+                    "id": "a33e576f-7b88-4c5c-8590-fa7f36c1991c"
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "OK"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "loose",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "2872a05a-8f62-4a4a-aad5-6954f2d3747c",
+                    "leftValue": "={{ $json.links}}",
+                    "rightValue": "0",
+                    "operator": {
+                      "type": "array",
+                      "operation": "empty",
+                      "singleValue": true
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "NullHyperlink"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "loose",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "73f7f831-5ad9-42d8-95fb-ba65552ff91c",
+                    "leftValue": "={{ $json.content.isEmpty() }}",
+                    "rightValue": "",
+                    "operator": {
+                      "type": "boolean",
+                      "operation": "true",
+                      "singleValue": true
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "NullContent"
+            }
+          ]
+        },
+        "looseTypeValidation": true,
+        "options": {}
+      },
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.3,
+      "position": [
+        2928,
+        2176
+      ],
+      "id": "8458420a-709b-41ed-8cc8-eadc5f70cd39",
+      "name": "Switch",
+      "alwaysOutputData": false
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "const puppeteer = require('puppeteer-extra');\nconst stealthPlugin = require('puppeteer-extra-plugin-stealth');\n\n// Aplica o plugin Stealth\npuppeteer.use(stealthPlugin());\n\nasync function scrapeSubpage(url) {\n  // ... (toda a sua função scrapeSubpage até o try...catch) ...\n  // ... (o browser, page, setRequestInterception, etc. continuam iguais) ...\n  let browser = null;\n\n  try {\n    console.log(`🚀 Iniciando browser...`);\n    browser = await puppeteer.launch({\n      headless: true,\n      args: [\n        '--no-sandbox',\n        '--disable-setuid-sandbox',\n        '--disable-dev-shm-usage',\n        '--disable-gpu',\n      ],\n    });\n\n    const page = await browser.newPage();\n    page.setDefaultNavigationTimeout(30000);\n\n    // Bloqueia recursos desnecessários\n    await page.setRequestInterception(true);\n    page.on('request', (req) => {\n      if (['image', 'stylesheet', 'font'].includes(req.resourceType())) {\n        req.abort();\n      } else {\n        req.continue();\n      }\n    });\n    \n    console.log(`🕸️ Scraping subpage: ${url}`);\n    \n    // Adiciona uma verificação para garantir que a URL é uma string\n    if (typeof url !== 'string' || !url.startsWith('http')) {\n      throw new Error(`URL inválida ou não é uma string: ${url}`);\n    }\n\n    await page.goto(url, { waitUntil: 'networkidle2' });\n\n    // Extrai texto limpo\n    const content = await page.evaluate(() => {\n      //const text = document.body?.innerText || '';\n      //return text.replace(/\\s+/g, ' ').trim();\n      return document.documentElement.outerHTML;\n    });\n\n    await browser.close();\n\n    return {\n      json: {\n        success: true,\n        url,\n        content,\n        length: content.length,\n        timestamp: new Date().toISOString(),\n      }\n    };\n  } catch (error) {\n    // Garante que o browser feche mesmo se o goto() falhar\n    if (browser) {\n      await browser.close();\n    }\n    \n    // ****** MUDANÇA PRINCIPAL AQUI ******\n    // Use 'return' em vez de 'throw'\n    // Isso passa o erro adiante sem parar o workflow do n8n\n    return {\n      json: { \n        success: false, \n        url, \n        error: error.message,\n        timestamp: new Date().toISOString(),\n      }\n    };\n  }\n}\n\n// ===========================\n// Execução principal do node\n// ===========================\n\n// O Split Out envia o objeto no formato: { \"links\": \"https://...\" }\nconst url = $json.url;\n\n// ****** MUDANÇA PRINCIPAL AQUI ******\n// O resultado da função já é o objeto que queremos.\n// Não precisamos envolvê-lo em { json: ... }\nreturn scrapeSubpage(url);"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        4224,
+        1712
+      ],
+      "id": "0b2b1ed3-c3d8-4e72-a71d-4f2aca6424a1",
+      "name": "Subpage Scrapper",
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "/**\n * Puppeteer Scraper v3 (Corrigido)\n *\n * - Não usa 'puppeteer-extra-plugin-user-preferences'.\n * - Usa page.evaluate() para extrair texto e links absolutos (corrigindo o problema original).\n * - Corrige a inicialização do Puppeteer com Stealth.\n * - Limpa o fluxo de retorno e o fechamento do browser.\n */\n\nconst puppeteer = require('puppeteer-extra');\nconst stealthPlugin = require('puppeteer-extra-plugin-stealth');\n\n// Aplica o plugin Stealth\npuppeteer.use(stealthPlugin());\n\nasync function scrapePage(urlToScrape) {\n  let browser = null;\n\n  try {\n    console.log(`🚀 Iniciando browser...`);\n    browser = await puppeteer.launch({\n      headless: true,\n      args: [\n        '--no-sandbox',\n        '--disable-setuid-sandbox',\n        '--disable-dev-shm-usage',\n        '--disable-gpu',\n      ],\n    });\n\n    const page = await browser.newPage();\n    page.setDefaultNavigationTimeout(30000);\n\n    // Bloqueia recursos desnecessários\n    await page.setRequestInterception(true);\n    page.on('request', (req) => {\n      if (['image', 'stylesheet', 'font'].includes(req.resourceType())) {\n        req.abort();\n      } else {\n        req.continue();\n      }\n    });\n\n    console.log(`🕸️ Acessando página: ${urlToScrape}`);\n    await page.goto(urlToScrape, { waitUntil: 'networkidle2' });\n\n    // 1. Verificação de CAPTCHA (baseada no HTML bruto)\n    const pageContent = await page.content();\n    if (pageContent.toLowerCase().includes('captcha') || pageContent.toLowerCase().includes('are you a robot')) {\n      return { success: false, url: urlToScrape, content: null, links: [], error: 'Captcha detectado' };\n    }\n\n    // 2. Extração de Dados (via page.evaluate)\n    // 'a.href' dentro do evaluate() retorna o link ABSOLUTO.\n    const result = await page.evaluate(() => {\n      // Extrai o texto limpo\n      //const content = (document.body?.innerText || '').replace(/\\s+/g, ' ').trim();\n      const content = document.documentElement.outerHTML;\n      \n      // Extrai links, garante que são únicos e pega os 10 primeiros\n      const allLinks = Array.from(document.querySelectorAll('a[href]'));\n      const uniqueAbsoluteLinks = [...new Set(\n        allLinks\n          .map(a => a.href) // 'a.href' resolve caminhos relativos!\n          .filter(href => href.startsWith('http')) // Garante que são links web\n      )];\n      \n      const links = uniqueAbsoluteLinks.slice(0, 10);\n\n      return { content, links };\n    });\n\n    // 3. Verificações de Sucesso (baseadas no 'result')\n    if (!result.content || result.content.length < 50) {\n      return { success: false, url: urlToScrape, content: result.content, links: result.links, error: 'Conteúdo não encontrado ou muito curto' };\n    }\n\n    if (result.links.length === 0) {\n      return { success: false, url: urlToScrape, content: result.content, links: result.links, error: 'Nenhum hyperlink encontrado' };\n    }\n\n    // 4. Sucesso!\n    return {\n      success: true,\n      url: urlToScrape,\n      content: result.content,\n      links: result.links,\n      timestamp: new Date().toISOString(),\n    };\n\n  } catch (error) {\n    console.error(`❌ Erro no scrape: ${error.message}`);\n    return {\n      success: false,\n      url: urlToScrape,\n      error: error.message,\n      timestamp: new Date().toISOString(),\n    };\n  } finally {\n    // 5. Garante que o browser sempre será fechado\n    if (browser) {\n      console.log(`🔒 Fechando browser...`);\n      await browser.close();\n    }\n  }\n}\n\n// ===========================\n// Execução principal do node\n// ===========================\nconst url = $input.first().json.url\n\nif (!url) {\n  return { json: { success: false, error: \"Nenhuma 'url' fornecida no input do Webhook.\" } };\n}\n\nconst output = await scrapePage(url);\n\n// Retorna um único objeto JSON\nreturn { json: output };"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2752,
+        2192
+      ],
+      "id": "0570d10f-9aad-4bff-b851-944e9cc1cb25",
+      "name": "PuppeteerScraper"
+    },
+    {
+      "parameters": {
+        "aggregate": "aggregateAllItemData",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.aggregate",
+      "typeVersion": 1,
+      "position": [
+        4336,
+        2080
+      ],
+      "id": "3eb2ca5b-6fcd-4146-b5ac-b13c894e4cc7",
+      "name": "AggregateSubpages"
+    },
+    {
+      "parameters": {
+        "url": "=http://api.scrape.do",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpQueryAuth",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "url",
+              "value": "={{ $json.url }}"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 120000
+        }
+      },
+      "id": "bbc24172-aee7-4d16-b853-fa02af9c95ae",
+      "name": "Scrape.do1",
+      "type": "n8n-nodes-base.httpRequest",
+      "position": [
+        3104,
+        2304
+      ],
+      "retryOnFail": true,
+      "typeVersion": 4.2,
+      "waitBetweenTries": 5000,
+      "credentials": {
+        "httpQueryAuth": {
+          "id": "xeiLUy9NBQzzilTH",
+          "name": "Query Auth account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "url": "=http://api.scrape.do",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpQueryAuth",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "url",
+              "value": "={{ $('Webhook').item.json.body.url }}"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 120000
+        }
+      },
+      "id": "d4fed834-0122-41d0-a7bf-600c7ca50e90",
+      "name": "Scrape.do2",
+      "type": "n8n-nodes-base.httpRequest",
+      "position": [
+        4416,
+        1920
+      ],
+      "retryOnFail": true,
+      "typeVersion": 4.2,
+      "waitBetweenTries": 5000,
+      "credentials": {
+        "httpQueryAuth": {
+          "id": "xeiLUy9NBQzzilTH",
+          "name": "Query Auth account"
+        }
+      },
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "fieldToSplitOut": "links",
+        "include": "allOtherFields",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.splitOut",
+      "typeVersion": 1,
+      "position": [
+        3616,
+        1712
+      ],
+      "id": "b3f192a7-19a8-4322-b658-a17278404493",
+      "name": "Split Out"
+    },
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        2432,
+        2192
+      ],
+      "id": "8256e5c9-12c1-4c20-8c4e-96d125dd5a55",
+      "name": "When clicking ‘Execute workflow’"
+    },
+    {
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "value": "18ERlfLcL5JITmWumxFxwBFcgMCYcRXDR84T6BTgrMP4",
+          "mode": "list",
+          "cachedResultName": "sheets-tegra-n8n",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/18ERlfLcL5JITmWumxFxwBFcgMCYcRXDR84T6BTgrMP4/edit?usp=drivesdk"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "gid=0",
+          "mode": "list",
+          "cachedResultName": "webpages_links",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/18ERlfLcL5JITmWumxFxwBFcgMCYcRXDR84T6BTgrMP4/edit#gid=0"
+        },
+        "filtersUI": {
+          "values": [
+            {
+              "lookupColumn": "status",
+              "lookupValue": "pending"
+            }
+          ]
+        },
+        "options": {
+          "returnFirstMatch": true
+        }
+      },
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        2592,
+        2192
+      ],
+      "id": "fdb18e5d-9750-4bda-9d5c-5a82d3433e38",
+      "name": "GetPendingURL",
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "IDAonKpQ4UfBOEpG",
+          "name": "GoogleAuthSheets"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "18ERlfLcL5JITmWumxFxwBFcgMCYcRXDR84T6BTgrMP4",
+          "mode": "list",
+          "cachedResultName": "sheets-tegra-n8n",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/18ERlfLcL5JITmWumxFxwBFcgMCYcRXDR84T6BTgrMP4/edit?usp=drivesdk"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "gid=0",
+          "mode": "list",
+          "cachedResultName": "webpages_links",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/18ERlfLcL5JITmWumxFxwBFcgMCYcRXDR84T6BTgrMP4/edit#gid=0"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "url": "={{ $json.url }}",
+            "instructions": "={{ $json.instructions }}",
+            "status": "={{ $json.status }}",
+            "last_updated": "={{ $json.last_updated }}",
+            "error_notes": "={{ $json.error_notes }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "url",
+              "displayName": "url",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "instructions",
+              "displayName": "instructions",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "status",
+              "displayName": "status",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "last_updated",
+              "displayName": "last_updated",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "error_notes",
+              "displayName": "error_notes",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        3952,
+        1712
+      ],
+      "id": "2b257242-7fb4-4277-b3d0-15cbc5793a70",
+      "name": "Append row in sheet",
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "IDAonKpQ4UfBOEpG",
+          "name": "GoogleAuthSheets"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "/*\n * SCRIPT: Code in JavaScript1 (Fallback Subpágina)\n * * INPUT: HTML bruto do nó Scrape.do2.\n * OUTPUT: Formato idêntico ao Subpage Scraper { success, url, content, error_notes }\n */\n\n// --- Execução Principal ---\n\nconst scrapeDoResult = $input.first().json; // Recebe o HTML (ou erro)\n// A URL da subpágina vem do item que entrou neste loop\n// Assumindo que o Split Out passou { links: \"url_subpagina\" }\n// Se o seu Split Out passou { url: \"url_subpagina\" }, mude abaixo\nconst subpageUrl = $input.first().json.links || $input.first().json.url; \n\nif (!subpageUrl) {\n    throw new Error(\"Não foi possível encontrar a URL da subpágina no input do loop.\");\n}\n\n// Verifica se o Scrape.do2 retornou um erro\nif (typeof scrapeDoResult !== 'string') {\n   return {\n     json: {\n       success: false,\n       url: subpageUrl,\n       content: null,\n       error_notes: `Fallback Scrape.do2 falhou: ${JSON.stringify(scrapeDoResult)}`\n     }\n   };\n}\n\nconst htmlContent = scrapeDoResult;\n\n// Verifica conteúdo mínimo\nif (!htmlContent || htmlContent.length < 50) {\n  return {\n    json: {\n       success: false,\n       url: subpageUrl,\n       content: htmlContent,\n       error_notes: 'Fallback Scrape.do2 retornou conteúdo muito curto ou vazio.'\n    }\n  };\n}\n\n// Sucesso no Fallback\nreturn {\n  json: {\n    success: true,\n    url: subpageUrl,\n    content: htmlContent, // O HTML bruto\n    error_notes: 'Used Scrape.do2 Fallback' // Nota opcional\n  }\n};"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        4656,
+        1920
+      ],
+      "id": "aec92ce1-8804-40a5-8151-f31044bed7a8",
+      "name": "HTML Extractor",
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "d23c65be-ba06-46f4-8d1f-cf478e6e58b2",
+              "name": "url",
+              "value": "={{ $json.links }}",
+              "type": "string"
+            },
+            {
+              "id": "6b753e76-ba03-4bc6-b780-cbbafead681f",
+              "name": "instructions",
+              "value": "={{ $('GetPendingURL').item.json.instructions }}",
+              "type": "string"
+            },
+            {
+              "id": "959001e5-e4bf-41ec-b5e3-262abb358018",
+              "name": "status",
+              "value": "pending",
+              "type": "string"
+            },
+            {
+              "id": "15f45a34-6eb4-44d6-ba5b-bc30b7954b74",
+              "name": "last_updated",
+              "value": "={{ $now.toISO() }}",
+              "type": "string"
+            },
+            {
+              "id": "ac36c06a-4505-4516-b3a2-577ed19a0465",
+              "name": "error_notes",
+              "value": "",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        3776,
+        1712
+      ],
+      "id": "7e8af143-84eb-40c2-a61a-9391bb9a05d4",
+      "name": "Set hyperlink fields"
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "documentId": {
+          "__rl": true,
+          "value": "18ERlfLcL5JITmWumxFxwBFcgMCYcRXDR84T6BTgrMP4",
+          "mode": "list",
+          "cachedResultName": "sheets-tegra-n8n",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/18ERlfLcL5JITmWumxFxwBFcgMCYcRXDR84T6BTgrMP4/edit?usp=drivesdk"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "gid=0",
+          "mode": "list",
+          "cachedResultName": "webpages_links",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/18ERlfLcL5JITmWumxFxwBFcgMCYcRXDR84T6BTgrMP4/edit#gid=0"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "url": "={{ $json.url }}",
+            "last_updated": "={{ $json.last_updated }}",
+            "error_notes": "={{ $json.error_notes }}",
+            "instructions": "={{ $json.instructions }}",
+            "status": "={{ $json.status }}"
+          },
+          "matchingColumns": [
+            "url"
+          ],
+          "schema": [
+            {
+              "id": "url",
+              "displayName": "url",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "instructions",
+              "displayName": "instructions",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "status",
+              "displayName": "status",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "last_updated",
+              "displayName": "last_updated",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "error_notes",
+              "displayName": "error_notes",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "row_number",
+              "displayName": "row_number",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "number",
+              "canBeUsedToMatch": true,
+              "readOnly": true,
+              "removed": true
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        5120,
+        2192
+      ],
+      "id": "4d1067c0-6872-4f74-aac5-45185867d78b",
+      "name": "Update row in sheet",
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "IDAonKpQ4UfBOEpG",
+          "name": "GoogleAuthSheets"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "// Assume que 'data' vem do input do n8n (ou de outra fonte)\nconst data = $json.data\n\n/**\n * Extrai texto limpo e legível de uma string HTML.\n * @param {string} html - A string HTML bruta.\n * @returns {string} O texto extraído e limpo.\n */\nfunction extractTextFromHTML(html) {\n  if (typeof html !== 'string') return '';\n\n  const cleanedHTML = html\n    // Remove blocos de conteúdo não visíveis ou indesejados\n    .replace(/<script[\\s\\S]*?>[\\s\\S]*?<\\/script>/gi, ' ')\n    .replace(/<style[\\s\\S]*?>[\\s\\S]*?<\\/style>/gi, ' ')\n    .replace(/<head[\\s\\S]*?>[\\s\\S]*?<\\/head>/gi, ' ')\n    .replace(/<nav[\\s\\S]*?>[\\s\\S]*?<\\/nav>/gi, ' ')\n    .replace(/<footer[\\s\\S]*?>[\\s\\S]*?<\\/footer>/gi, ' ')\n    \n    // Substitui todas as tags HTML restantes por um espaço\n    // Isso evita que palavras se juntem (ex: <p>Olá</p><p>Mundo</p> -> \"Olá Mundo\")\n    .replace(/<[^>]+>/g, ' ')\n    \n    // Substitui múltiplos espaços, tabs ou quebras de linha por um único espaço\n    .replace(/\\s+/g, ' ')\n    .trim();\n    \n  return cleanedHTML;\n}\n\n/**\n * Extrai todos os URLs (atributos href) de uma string HTML.\n * @param {string} html - A string HTML bruta.\n * @returns {string[]} Um array de URLs.\n */\nfunction extractLinksFromHTML(html) {\n  if (typeof html !== 'string') return [];\n  \n  const links = [];\n  // Regex para encontrar tags <a> e capturar o atributo href\n  // Lida com aspas simples ou duplas\n  const linkRegex = /<a\\s+[^>]*?href\\s*=\\s*[\"']([^\"']*)[\"']/gi;\n  \n  // Usamos matchAll para encontrar todas as ocorrências\n  const matches = html.matchAll(linkRegex);\n\n  for (const match of matches) {\n    const url = match[1]; // O grupo capturado (a URL)\n    \n    // Filtra links vazios, âncoras de página (#) ou ações javascript\n    if (url && !url.startsWith('#') && !url.toLowerCase().startsWith('javascript:')) {\n      links.push(url);\n    }\n    // Para o loop assim que atingir 10 links\n    if (links.length >= 10) {\n      break;\n    }\n  }\n  \n  // Retorna apenas links únicos\n  return [...new Set(links)];\n}\n\n// --- Execução ---\n\n// Extrai as duas informações do HTML\nconst extractedText = extractTextFromHTML(data);\nconst extractedLinks = extractLinksFromHTML(data);\n\n// Retorna no formato JSON desejado\nreturn {\n  success: $json.data ? true : false,\n  content: extractedText,\n  links: extractedLinks\n};"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3248,
+        2304
+      ],
+      "id": "5e8c705e-db1e-44c1-8026-4d5e57fc4fcf",
+      "name": "ExtractHtmlSubpage"
+    },
+    {
+      "parameters": {
+        "jsCode": "/*\n * SCRIPT 1: FORMATADOR DA PÁGINA PRINCIPAL\n * Coloque este nó logo após o Main_Page_AI_Agent\n */\n\n// --- Função Helper para parsear o output da IA ---\nfunction parseAiOutput(aiItemJson) {\n  try {\n    // aiItemJson é o { output: \"```json...\" }\n    const jsonString = aiItemJson.output.replace(/```json\\n|```/g, '').trim();\n    const parsed = JSON.parse(jsonString);\n    // Retorna o primeiro item (ou vazio) pois a IA foi instruída a agregar por URL\n    return (parsed.extracted_data && parsed.extracted_data[0]) ? parsed.extracted_data[0] : {};\n  } catch (e) {\n    console.error(\"Falha ao parsear JSON da IA (Main):\", e.message, aiItemJson.output);\n    return {};\n  }\n}\n\n// --- 1. Obter todas as fontes de dados ---\n\n// Fonte A: Output da IA (Input deste nó)\nconst aiOutput = $input.first().json;\nconst aiData = parseAiOutput(aiOutput);\n\n// Fonte B: Dados Iniciais (do início)\n// !!! MUDE \"GetPendingURL\" para o nome do seu nó inicial !!!\nconst startData = $node[\"GetPendingURL\"].json;\nconst instructions = startData.instructions;\n\n// Fonte C: Dados do Scrape da PÁGINA PRINCIPAL (do Merge ANTES da IA)\n// !!! MUDE \"Merge_Main_Scrape\" para o nome do nó Merge que uniu Scraper/Fallback !!!\nconst mainPageScrapeData = $node[\"Merge\"].json;\nif (!mainPageScrapeData) {\n    throw new Error(\"Não foi possível encontrar os dados de scrape da Página Principal no nó Merge_Main_Scrape.\");\n}\nconst page = mainPageScrapeData;\n\n// --- 2. Preparar e retornar o item ---\nconst now = new Date().toISOString();\n\nreturn {\n  json: {\n    url: page.url,\n    instructions: instructions,\n    status: page.success ? 'completed' : 'failed',\n    last_updated: now,\n    error_notes: page.error_notes || '',\n    extracted_content: aiData.extracted_content || '' // Conteúdo da IA principal\n  }\n};"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        4144,
+        2464
+      ],
+      "id": "b0312eef-bf39-430d-8c2a-53fc05cbac34",
+      "name": "CodeFormatMainPage"
+    },
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3.2,
+      "position": [
+        3424,
+        2176
+      ],
+      "id": "c374f589-0969-434f-b6e2-7a38eb1ece63",
+      "name": "Merge"
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=INSTRUCTIONS:\n{{ $('GetPendingURL').item.json.instructions }}\nEXECUTION_TIMESTAMP:\n{{ $now.toISO() }}\n\nCONTENT_TO_ANALYZE:\n\n[Subpage]\nURL: {{ $json.url }}\nContent: {{ $json.content }}\n[End of Subpage]",
+        "needsFallback": true,
+        "options": {
+          "systemMessage": "# AI Agent Configuration: Content Extractor\n\n## 1. Role\n\nContent Extractor\n\n## 2. Context\n\nYou are an AI data extraction agent. Your purpose is to analyze the provided `CONTENT_TO_ANALYZE`, which is split into `[Main Page]` and `[Subpages]`.\n\nYou must strictly follow the `INSTRUCTIONS` to identify, extract \"as-is\" (verbatim), and correlate *only* the relevant text segments.\n\nThe content you extract will be used to feed a vector database (via the `scrape_vector_store` tool). Your final answer *must* be a formatted JSON object.\n\n## 3. Tools\n\n(This defines the available tool for the agent.)\n\n```json\n[\n  {\n    \"name\": \"scrape_vector_store\",\n    \"description\": \"Stores the extracted content and its source URL in a Supabase vector database. Use this tool to save the final data.\",\n    \"parameters\": {\n      \"type\": \"object\",\n      \"properties\": {\n        \"data_to_store\": {\n          \"type\": \"array\",\n          \"items\": {\n            \"type\": \"object\",\n            \"properties\": {\n              \"source_url\": {\n                \"type\": \"string\",\n                \"description\": \"The URL where the content was extracted from.\"\n              },\n              \"content_chunk\": {\n                \"type\": \"string\",\n                \"description\": \"The extracted text chunk.\"\n              },\n              \"timestamp\": {\n                \"type\": \"string\",\n                \"description\": \"ISO timestamp of the extraction.\"\n              }\n            },\n            \"required\": [\"source_url\", \"content_chunk\", \"timestamp\"]\n          }\n        }\n      },\n      \"required\": [\"data_to_store\"]\n    }\n  }\n]```\n\n## 4. Reasoning (Chain of Thought)\n(This is the internal reasoning the agent will follow.)\n\n1.  First, I will read and understand the `INSTRUCTIONS`.\n2.  I will identify the `EXECUTION_TIMESTAMP`.\n3.  I will scan the `Content` (which is HTML) for relevant information based on the `INSTRUCTIONS` (e.g., product titles and prices).\n4.  I will temporarily store *all* extracted segments as `{ url: \"source_url\", content: \"extracted_segment\" }`.\n5.  After analyzing all `[Main Page]` and `[Subpages]` blocks, I will **group all temporarily stored segments by their unique `url`**.\n6.  For each unique `url`, I will **aggregate all its corresponding `content` segments into a single string**. I will use a newline character (`\\n`) as a separator.\n7.  I will format my final answer as a JSON object, following the `Output Rules`, creating *only one object* per unique `source_url`.\n## 5. Output Rules (Structured Output Parser)\n(Defines the mandatory JSON output format.)\n## Output rules\n- The output format must be *exclusively* a JSON object.\n- The `extracted_data` array must contain *only one object per unique source_url*.\n- The `extracted_content` field MUST contain all segments found for that URL, joined together into a single string (separated by newlines `\\n`).\n\n- Example of a *good* `extracted_content` (all segments joined): \n  `\"Title: A Light in the ..., Price: £51.77\\nTitle: Tipping the Velvet, Price: £53.74\"`\n\n- Example of a *bad* structure (which is now forbidden):\n  `...{ \"source_url\": \"url1\", \"extracted_content\": \"chunk A\" }, { \"source_url\": \"url1\", \"extracted_content\": \"chunk B\" }...`\n\n- The final JSON structure must be:\n{\n  \"extracted_data\": [\n    {\n      \"source_url\": \"https://books.toscrape.com/index.html\",\n      \"extracted_content\": \"Title: A Light in the ..., Price: £51.77\\nTitle: Tipping the Velvet, Price: £53.74\\nTitle: Soumission, Price: £50.10\",\n      \"timestamp\": \"the_value_of_the_EXECUTION_TIMESTAMP\"\n    },\n    {\n      \"source_url\": \"https://books.toscrape.com/catalogue/category/books/travel_2/index.html\",\n      \"extracted_content\": \"Title: It's Only the Himalayas, Price: £45.17\\nTitle: Full Moon over ..., Price: £49.43\",\n      \"timestamp\": \"the_value_of_the_EXECUTION_TIMESTAMP\"\n    }\n  ]\n}\n\n- If no relevant content is found, return an empty array:\n{\n  \"extracted_data\": []\n}"
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 2.2,
+      "position": [
+        3808,
+        2080
+      ],
+      "id": "95b2ec2b-e217-4071-8716-952a68c7e010",
+      "name": "AIAgentSubpage",
+      "retryOnFail": true,
+      "waitBetweenTries": 5000,
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=INSTRUÇÕES:\n{{ $('GetPendingURL').item.json.instructions }}\n\nCONTEÚDO:\n[Página principal]{{ $json.content }}\n[FIM Página principal]\n",
+        "options": {
+          "systemMessage": "# AI Agent Configuration: Content Extractor\n\n## 1. Role\n\nYou are an AI data extraction agent. Your purpose is to analyze the provided `CONTENT_TO_ANALYZE`, which is split into `[Main Page]` and `[Subpages]`.\nYou must strictly follow the `INSTRUCTIONS` to identify, extract \"as-is\" (verbatim), and correlate *only* the relevant text segments.\n\nYou are an AI agent that parses raw **HTML content**, not plain text. You must navigate the HTML structure to find data, connecting related pieces of information (like a product title and its price).\n\n**Reasoning:**\n1.  First, I will read and understand the `INSTRUCTIONS`.\n2.  I will identify the `EXECUTION_TIMESTAMP`.\n3.  I will scan the `Content` (which is HTML) for relevant information based on the `INSTRUCTIONS` (e.g., product titles and prices).\n4.  I will temporarily store *all* extracted segments as `{ url: \"source_url\", content: \"extracted_segment\" }`.\n5.  After analyzing all `[Main Page]` and `[Subpages]` blocks, I will **group all temporarily stored segments by their unique `url`**.\n6.  For each unique `url`, I will **aggregate all its corresponding `content` segments into a single string**. I will use a newline character (`\\n`) as a separator.\n7.  I will format my final answer as a JSON object, following the `Output Rules`, creating *only one object* per unique `source_url`.\n\n**Output Rules:**\n- The output format must be *exclusively* a JSON object.\n- The `extracted_data` array must contain *only one object per unique source_url*.\n- The `extracted_content` field MUST contain all segments found for that URL, joined together into a single string (separated by newlines `\\n`).\n- Example `extracted_content`: \"Title: A Light in the ..., Price: £51.77\\nTitle: Tipping the Velvet, Price: £53.74\"\n\n- The final JSON structure must be:\n{\n  \"extracted_data\": [\n    {\n      \"source_url\": \"url_of_the_source_page\",\n      \"extracted_content\": \"all_relevant_segments_joined_by_newline\",\n      \"timestamp\": \"the_value_of_the_EXECUTION_TIMESTAMP\"\n    }\n  ]\n}\n\n- If no relevant content is found, return an empty array:\n{\n  \"extracted_data\": []\n}"
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 2.2,
+      "position": [
+        3808,
+        2464
+      ],
+      "id": "9eab0b9d-5878-447a-8e09-e3854951aa73",
+      "name": "MainPageAIAgent"
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "/*\n * SCRIPT 2: FORMATADOR DAS SUBPÁGINAS (DENTRO DO LOOP)\n * Coloque este nó logo após o AI_Agent_Subpage (dentro do loop)\n */\n\n// --- Função Helper para parsear o output da IA ---\nfunction parseAiOutput(aiItemJson) {\n  try {\n    // aiItemJson é o { output: \"```json...\" }\n    const jsonString = aiItemJson.output.replace(/```json\\n|```/g, '').trim();\n    const parsed = JSON.parse(jsonString);\n    // Retorna o primeiro item (ou vazio)\n    return (parsed.extracted_data && parsed.extracted_data[0]) ? parsed.extracted_data[0] : {};\n  } catch (e) {\n    console.error(\"Falha ao parsear JSON da IA (Subpage):\", e.message, aiItemJson.output);\n    return {};\n  }\n}\n\n// --- 1. Obter todas as fontes de dados ---\n\n// Fonte A: Output da IA (Input deste nó)\n// O nó da IA passa adiante os dados que ele recebeu (scrape data)\nconst aiOutput = $json\nconst aiData = parseAiOutput(aiOutput);\n\n// Fonte B: Dados Iniciais (do início)\n// !!! MUDE \"GetPendingURL\" para o nome do seu nó inicial !!!\nconst startData = $('GetPendingURL').item.json\nconst instructions = startData.instructions;\n\n// Fonte C: Dados do Scrape da SUBPÁGINA (estão no input, passados pela IA)\n// O nó da IA deveria ter recebido { success, url, content, error_notes } do Merge_Subpage_Result\nconst scrapeData = $('Subpage Scrapper').item.json\n//if (!aiData || !aiData.source_url) {\n//    throw new Error(\"Input para Code_Format_Subpage não contém dados de scrape (url, success). Verifique o nó Merge anterior à IA.\");\n\n\n// --- 2. Preparar e retornar o item ---\nconst now = new Date().toISOString();\n\nreturn {\n  json: {\n    url: scrapeData.url, // Veio do input (scrape)\n    instructions: instructions, // Veio do nó inicial\n    status: scrapeData.success ? 'completed' : 'failed', // Veio do input (scrape)\n    last_updated: now,\n    error_notes: scrapeData.error_notes || '', // Veio do input (scrape)\n    content: aiData.extracted_content || '' // Veio do output da IA\n  }\n};"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        4160,
+        2080
+      ],
+      "id": "bdb740b6-6fa4-44fb-a247-954fec10928a",
+      "name": "SubPageFormatter"
+    },
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3.2,
+      "position": [
+        4800,
+        1712
+      ],
+      "id": "4ba308bb-d799-4c5f-a557-cf2ae47497db",
+      "name": "Merge1"
+    },
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3.2,
+      "position": [
+        4480,
+        2336
+      ],
+      "id": "b1380c13-ba4c-4387-b21f-44be9aa40bfc",
+      "name": "Merge2"
+    },
+    {
+      "parameters": {
+        "jsCode": "const dataArray = $input.first().json.data\nif (!Array.isArray(dataArray)) return [];\n\nreturn dataArray.map(item => ({ json: item }));\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        5136,
+        2416
+      ],
+      "id": "5fc249dc-321d-4f80-b8bb-e15fc8808b84",
+      "name": "FlattenResult"
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "// Este código roda para CADA item (URL) do nó anterior\nconst item = $json;\nconst outputItems = [];\n\n// 1. \"Explode\" o campo 'content' em linhas\nconst chunks = item.content.split('\\n')\n  .map(line => line.trim())\n  .filter(line => line.length > 0);\n\nconst totalChunks = chunks.length;\n\n// 2. Cria um novo item de saída para CADA chunk (título)\nfor (let i = 0; i < chunks.length; i++) {\n  const chunkText = chunks[i];\n  \n  // Formato obrigatório para o nó 'Supabase Vector Store'\n  const newItem = {\n    // pageContent é a chave padrão que o nó procura para embedar\n    chunk_text: chunkText,\n    source_url: item.url,\n    chunk_index: i,\n    total_chunks: totalChunks,\n    last_updated: item.last_updated,\n    // metadata é onde colocamos todos os dados extras\n    metadata: {\n      instructions: item.instructions,\n      status: item.status           \n    }\n  };\n\n  outputItems.push({ json: newItem });\n}\n\n// 4. Retorna um array de itens. \n// O n8n vai criar múltiplos itens (um para cada título de livro)\nreturn {json: {outputItems}};"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        5328,
+        2416
+      ],
+      "id": "96accfac-c8a9-49e9-844f-70417b1b547e",
+      "name": "ChunkContent"
+    },
+    {
+      "parameters": {
+        "jsCode": "/*\n * SCRIPT 3: MESCLAGEM FINAL (após Page + Subpages)\n * Entrada 0 → Página principal formatada (CodeFormatMainPage)\n * Entrada 1 → Subpáginas agregadas (AggregateSubpages)\n */\n\nconst finalItemsToUpdate = [];\n\n// Entrada 0: Página principal\nconst mainInput = $input.first().json\nif (mainInput) {\n  finalItemsToUpdate.push({ json: mainInput });\n} else {\n  console.warn(\"⚠️ Nenhum dado da página principal encontrado.\");\n}\n\n// Entrada 1: Subpáginas agregadas\nconst subInput = $input.last().json.data \nif (subInput && Array.isArray(subInput.data)) {\n  for (const subpage of subInput.data) {\n    finalItemsToUpdate.push({ json: subpage });\n  }\n} else if (Array.isArray(subInput)) {\n  // Caso o input já seja um array direto (sem wrapper data)\n  for (const subpage of subInput) {\n    finalItemsToUpdate.push({ json: subpage });\n  }\n} else if (subInput && typeof subInput === 'object') {\n  // Caso seja apenas um objeto único\n  finalItemsToUpdate.push({ json: subInput });\n} else {\n  console.warn(\"⚠️ Nenhum dado de subpáginas encontrado na entrada 1.\");\n}\n\nreturn finalItemsToUpdate;\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        4736,
+        2336
+      ],
+      "id": "684651b6-b00b-416e-a717-e683ca6972a1",
+      "name": "FinalFormatter"
+    },
+    {
+      "parameters": {
+        "fieldToSplitOut": "data",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.splitOut",
+      "typeVersion": 1,
+      "position": [
+        4928,
+        2192
+      ],
+      "id": "d5462f18-5fea-4ead-b54f-e8edb3430c62",
+      "name": "Split Out1"
+    },
+    {
+      "parameters": {
+        "operation": "appendOrUpdate",
+        "documentId": {
+          "__rl": true,
+          "value": "18ERlfLcL5JITmWumxFxwBFcgMCYcRXDR84T6BTgrMP4",
+          "mode": "list",
+          "cachedResultName": "sheets-tegra-n8n",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/18ERlfLcL5JITmWumxFxwBFcgMCYcRXDR84T6BTgrMP4/edit?usp=drivesdk"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "gid=0",
+          "mode": "list",
+          "cachedResultName": "webpages_links",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/18ERlfLcL5JITmWumxFxwBFcgMCYcRXDR84T6BTgrMP4/edit#gid=0"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "url": "={{ $json.url }}",
+            "instructions": "={{ $('GetPendingURL').item.json.instructions }}",
+            "status": "={{ $('PuppeteerScraper').item.json.success ? 'completed' : 'failed' }}",
+            "last_updated": "={{ $('PuppeteerScraper').item.json.timestamp }}",
+            "error_notes": "={{ $json.error ? $json.error:''}}"
+          },
+          "matchingColumns": [
+            "url"
+          ],
+          "schema": [
+            {
+              "id": "url",
+              "displayName": "url",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "instructions",
+              "displayName": "instructions",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "status",
+              "displayName": "status",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "last_updated",
+              "displayName": "last_updated",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "error_notes",
+              "displayName": "error_notes",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        3168,
+        2000
+      ],
+      "id": "63e7086a-b58a-48c0-994a-dee9f3a1ed54",
+      "name": "Append or update row in sheet",
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "IDAonKpQ4UfBOEpG",
+          "name": "GoogleAuthSheets"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "fieldToSplitOut": "outputItems",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.splitOut",
+      "typeVersion": 1,
+      "position": [
+        5536,
+        2416
+      ],
+      "id": "2017dd43-5378-4b9d-a082-4717d5e22e38",
+      "name": "Split Out2"
+    },
+    {
+      "parameters": {
+        "tableId": "scraped_content",
+        "dataToSend": "autoMapInputData"
+      },
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [
+        6160,
+        2416
+      ],
+      "id": "192bc6d2-44e6-4816-8b2e-bb8df918ae82",
+      "name": "Create a row",
+      "credentials": {
+        "supabaseApi": {
+          "id": "y0aIaBk9X7S8WmM3",
+          "name": "Supabase account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://generativelanguage.googleapis.com/v1beta/models/gemini-embedding-001:embedContent",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"model\": \"models/gemini-embedding-001\",\n  \"content\": { \n    \"parts\": [{ \"text\": \"{{ $json.json.chunk_text }}\" }]\n  },\n  \"outputDimensionality\": 1536\n}",
+        "options": {
+          "batching": {
+            "batch": {
+              "batchSize": 2,
+              "batchInterval": 3000
+            }
+          }
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        5744,
+        2416
+      ],
+      "id": "c95dddbc-1f11-46a6-a8da-95eaf5a95f93",
+      "name": "HTTP Request",
+      "credentials": {
+        "googlePalmApi": {
+          "id": "wp7MrW8D8ykDgdpg",
+          "name": "Google Gemini(PaLM) Api account"
+        },
+        "httpHeaderAuth": {
+          "id": "FWoXDrWfAaCRgnPt",
+          "name": "Google Embedding Auth"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "// O 'item' contém todos os dados do nó anterior\n// (chunk_text, source_url, etc. + a resposta da API 'embedding')\nconst item = $('Split Out2').item.json.json\n\n// 1. O HTTP Request retorna o embedding dentro de { \"embedding\": { \"values\": [...] } }\n// Nós precisamos extrair apenas o array 'values'.\nconst embeddingVector =$json.embedding.values;\n\n// 2. Opcional: Agrupar o metadata em um único objeto JSONB\n// (Assumindo que sua tabela tem uma coluna 'metadata' como no exemplo anterior)\nconst metadata = {\n  instructions: item.metadata.instructions,\n  status: item.metadata.status,\n  last_updated: item.last_updated\n  // Adicione quaisquer outros campos que você queira guardar no JSONB\n};\n\n// 3. Montar o objeto final limpo.\n// As chaves (ex: 'source_url') devem ser IDÊNTICAS\n// aos nomes das colunas da sua tabela Supabase.\nconst rowData = {\n  source_url: item.source_url,\n  chunk_text: item.chunk_text,\n  chunk_index: item.chunk_index,\n  total_chunks: item.total_chunks,\n  embedding: embeddingVector, // <-- O vetor limpo\n  metadata: metadata          // <-- O objeto JSONB\n};\n\n// 4. Retornar o objeto formatado\nreturn { json: rowData };"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        5952,
+        2416
+      ],
+      "id": "79434a31-5376-4e10-812b-62a5f40128c2",
+      "name": "Code in JavaScript"
+    },
+    {
+      "parameters": {
+        "modelName": "models/gemini-2.0-flash-001",
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatGoogleGemini",
+      "typeVersion": 1,
+      "position": [
+        3968,
+        2288
+      ],
+      "id": "58116084-e52b-4df5-b41d-bdde8f2864cd",
+      "name": "Fallback Model",
+      "credentials": {
+        "googlePalmApi": {
+          "id": "wp7MrW8D8ykDgdpg",
+          "name": "Google Gemini(PaLM) Api account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "modelName": "models/gemini-2.0-flash",
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatGoogleGemini",
+      "typeVersion": 1,
+      "position": [
+        3808,
+        2288
+      ],
+      "id": "4b8751b8-e6f1-4178-a3d0-133cbcc226cc",
+      "name": "Embedding Model",
+      "credentials": {
+        "googlePalmApi": {
+          "id": "wp7MrW8D8ykDgdpg",
+          "name": "Google Gemini(PaLM) Api account"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Switch": {
+      "main": [
+        [
+          {
+            "node": "Append or update row in sheet",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Merge",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Scrape.do1",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Scrape.do1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Subpage Scrapper": {
+      "main": [
+        [
+          {
+            "node": "Merge1",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Scrape.do2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "PuppeteerScraper": {
+      "main": [
+        [
+          {
+            "node": "Switch",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AggregateSubpages": {
+      "main": [
+        [
+          {
+            "node": "Merge2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Scrape.do1": {
+      "main": [
+        [
+          {
+            "node": "ExtractHtmlSubpage",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Scrape.do2": {
+      "main": [
+        [
+          {
+            "node": "HTML Extractor",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Split Out": {
+      "main": [
+        [
+          {
+            "node": "Set hyperlink fields",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "When clicking ‘Execute workflow’": {
+      "main": [
+        [
+          {
+            "node": "GetPendingURL",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "GetPendingURL": {
+      "main": [
+        [
+          {
+            "node": "PuppeteerScraper",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Append row in sheet": {
+      "main": [
+        [
+          {
+            "node": "Subpage Scrapper",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTML Extractor": {
+      "main": [
+        [
+          {
+            "node": "Merge1",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "Set hyperlink fields": {
+      "main": [
+        [
+          {
+            "node": "Append row in sheet",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "ExtractHtmlSubpage": {
+      "main": [
+        [
+          {
+            "node": "Merge",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "CodeFormatMainPage": {
+      "main": [
+        [
+          {
+            "node": "Merge2",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "Merge": {
+      "main": [
+        [
+          {
+            "node": "MainPageAIAgent",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Split Out",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AIAgentSubpage": {
+      "main": [
+        [
+          {
+            "node": "SubPageFormatter",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        []
+      ]
+    },
+    "MainPageAIAgent": {
+      "main": [
+        [
+          {
+            "node": "CodeFormatMainPage",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "SubPageFormatter": {
+      "main": [
+        [
+          {
+            "node": "AggregateSubpages",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Merge1": {
+      "main": [
+        [
+          {
+            "node": "AIAgentSubpage",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Merge2": {
+      "main": [
+        [
+          {
+            "node": "FinalFormatter",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "FlattenResult": {
+      "main": [
+        [
+          {
+            "node": "ChunkContent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "ChunkContent": {
+      "main": [
+        [
+          {
+            "node": "Split Out2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "FinalFormatter": {
+      "main": [
+        [
+          {
+            "node": "FlattenResult",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Split Out1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Split Out1": {
+      "main": [
+        [
+          {
+            "node": "Update row in sheet",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Append or update row in sheet": {
+      "main": [
+        []
+      ]
+    },
+    "Split Out2": {
+      "main": [
+        [
+          {
+            "node": "HTTP Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create a row": {
+      "main": [
+        []
+      ]
+    },
+    "HTTP Request": {
+      "main": [
+        [
+          {
+            "node": "Code in JavaScript",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code in JavaScript": {
+      "main": [
+        [
+          {
+            "node": "Create a row",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fallback Model": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "AIAgentSubpage",
+            "type": "ai_languageModel",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "Embedding Model": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "AIAgentSubpage",
+            "type": "ai_languageModel",
+            "index": 0
+          },
+          {
+            "node": "MainPageAIAgent",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "pinData": {},
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "eda06bf851bdc5d1d89bdce3b7bfbb6148aa3eddc68e813c84f039a2c64c1eb4"
+  }
+}
